@@ -1,4 +1,3 @@
-parsignators
-============
-
-Parsing combinators library based on Fokker's paper.
+¢¬ñğX‹ŸÖ
+ò¨‡VÍ/Ò
+r®‡V¨Ò¤VÚBäwRèj'†VXôO£¤Ä—„‰Æà€úãûJæßµ%åbİxÖ(ëÕÈºTúY½
