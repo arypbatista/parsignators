@@ -42,7 +42,7 @@ class Parser(object):
         return Result(x)
     
     # (++) :: Parser a -> Parser a -> Parser a
-    def __add__(self, self, other):
+    def __add__(self, other):
         return Plus(self, other)
 
     def __le__(self, f):
@@ -154,7 +154,7 @@ class Token(Parser):
     
 Fail = Parser.container(lambda stream: [])
     
-Item = Parser.container(lambda stream: [(stream[0], stream[1:])] if len(stream) > 0 else self.zero().parse(stream))
+Item = Parser.container(lambda stream: [(stream[0], stream[1:])] if len(stream) > 0 else Parser.zero().parse(stream))
     
 Satisfy = lambda p: Item >> (lambda x: Parser.result(x) if p(x) else Parser.zero())
     
@@ -291,7 +291,7 @@ class Many(Parser):
         return (Cons(self.parser, self) | (Epsilon <= nil_)).parse(stream)"""
 
 def Many(p):    
-    return (p >> (lambda x: Many(p) >> (lambda xs: Parser.result([x] + xs)))) + [[]]
+    return (p >> (lambda x: Many(p) >> (lambda xs: Parser.result([x] + xs)))) + Epsilon# [[]]
 
 Option = lambda parser: (parser <= list_) | (Epsilon <= nil_)
 
