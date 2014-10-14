@@ -27,7 +27,7 @@ at nodes by the static analysis tool.
         def pretty_print_list(elem_list):
             "Pretty print a list of AST nodes or other elements."
             lst = [pretty_print(elem) for elem in elem_list if elem != '']
-            return '\n'.join(lst)
+            return ('\n'.join(lst))
 
         tabulation = '    ' * indent        
         live_in, live_out = '', ''

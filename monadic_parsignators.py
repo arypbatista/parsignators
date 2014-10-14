@@ -2,6 +2,14 @@
 from pymonad.Reader import curry
 import re
 
+id_ = lambda x: x
+
+@curry
+def const(x,y): return x
+
+def flatten(xss):
+    return [x for xs in xss for x in xs]
+
 @curry
 def foldl(func, start, seq):
     if len(seq) == 0:
@@ -34,45 +42,49 @@ class Parser(object):
         return Bind(self, f)
 
     # zero :: Parser a
-    def zero(self):
+    @staticmethod
+    def zero():
         return Zero()
 
     # Result :: a -> Parser a
-    def result(self, x):
+    @staticmethod
+    def result(x):
         return Result(x)
     
     # (++) :: Parser a -> Parser a -> Parser a
     def __add__(self, other):
+        " Choice: p | q "
         return Plus(self, other)
 
     def __le__(self, f):
-        """ Applies: p <= f """
+        " Applies: p <= f "
         return Apply(self, f)
 
+    def __ge__(self, f):
+        "Result p => f()"
+        return self >> (lambda res: Parser.result(f(res)))
+
     def __lt__(self, other):
-        """ Ignores the right parser: p < q """
-        return CompositionIgnoreLast(self, other)
+        " Ignores the right parser: p < q "
+        return CompositionIgnoreRight(self, other)
 
     def __gt__(self, other):
-        """ Ignores the left parser: p > q """
-        return CompositionIgnoreFirst(self, other)
-
+        " Ignores the left parser: p > q "
+        return CompositionIgnoreLeft(self, other)
+    
     def __mul__(self, other):
-        """ Sequential Composition: p * q """
+        " Sequential Composition: p * q "
         return Composition(self, other)
 
     def __or__(self, other):
-        """ Choice: p | q """
-        return Choice(self, other)
+        " Choice: p | q "
+        return self + other
 
     def __parse__(self, stream):
         raise ParserException("Parsing not implemented.")
 
-    def parse(self, stream, whitespace_parser=None):       
-        if whitespace_parser is None:
-            whitespace_parser = WhiteSpace
-        #return self.__parse__(whitespace_parser.consume(stream))
-        return self.__parse__(stream)
+    def parse(self, stream):               
+        return self.__parse__(self.whitespace().consume(stream))
 
     def consume(self, stream):
         res = self.__parse__(stream)
@@ -81,19 +93,31 @@ class Parser(object):
         else:
             return res[0][1]
 
+    def whitespace(self):
+        return WhiteSpace
+
     def __repr__(self):
         return self.__class__.__name__ + "(" + ", ".join(map(repr, self.parsers)) + ")"
 
     @staticmethod
-    def container(f):
-        newp = Parser()
-        newp.__parse__ = f
-        return newp
+    def container(f, name="Container"):        
+        return Container(name, f)
+
+
+class Container(Parser):
+    
+    def __init__(self, name, f):
+        super(Container, self).__init__()
+        self.name = name
+        self.__parse__ = f
+    
+    def repr(self):    
+        return "(%s)" % (self.name, self.parser)
 
 
 class Zero(Parser):
     def __parse__(self, stream):
-        return []
+        return Parser.result([]).parse(stream)
     
     
 class Plus(Parser):    
@@ -108,8 +132,21 @@ class Bind(Parser):
         self.f = f
         
     def __parse__(self, stream):
-        return sum(map(lambda t: self.f(*t), self.parser.parse(stream), []))
+        res = []
+        for t in self.parser.parse(stream):
+            res = res + self.f(t[0]).parse(t[1])        
+        return res
+        #return flatten(map(lambda t: self.f(t[0]).parse(t[1]), self.parser.parse(stream), []))
 
+
+def Sequence(*parsers):
+    def seq_(parsers, *values):
+        if len(parsers) == 1:
+            return parsers[0] >= (lambda x: values + (x,))
+        else:            
+            return parsers[0] >> (lambda x: seq_(parsers[1:], *(values  + (x,))))
+    return seq_(parsers)
+    
     
 class Result(Parser):
     
@@ -144,28 +181,39 @@ class Token(Parser):
 
     def __parse__(self, stream):
         if len(self.tok) <= len(stream) and self.tok == stream[0:len(self.tok)]:
-            return [(self.tok, stream[len(self.tok):])]
+            return self.result(self.tok).parse(stream[len(self.tok):])
         else:
-            return [] 
+            return Fail.parse(stream) 
 
     def __repr__(self):
         return self.tok
 
-    
-Fail = Parser.container(lambda stream: [])
-    
-Item = Parser.container(lambda stream: [(stream[0], stream[1:])] if len(stream) > 0 else Parser.zero().parse(stream))
-    
-Satisfy = lambda p: Item >> (lambda x: Parser.result(x) if p(x) else Parser.zero())
-    
+class Forward(Parser):
 
-class SequentialComposition(Parser):
-    
+    def set(self, parser):
+        super(Forward, self).__init__(parser)
+
     def __parse__(self, stream):
-        self.parsers[0] >> (lambda x:
-        self.parsers[1] >>
-        Parser.result)
+        if self.parser is None:
+            raise ParserException("Forward parser has not been initialized yet.")
+        else:
+            return self.parser.__parse__(stream)
 
+class Name(Parser):
+
+    def __init__(self, parser, name, content=None):
+        super(Name, self).__init__(parser)
+        self.name = name
+        self.content = content
+
+    def __parse__(self, stream):
+        return self.parser.parse(stream)
+
+    def __repr__(self):
+        if self.content is None:
+            return self.name
+        else:
+            return "%s(%s)" % (self.name, self.content)
 
 class Succeed(Parser):
 
@@ -175,126 +223,40 @@ class Succeed(Parser):
         self.xs = xs
 
     def __parse__(self, stream):
-        return [(self.v, self.xs)]
+        return self.result(self.v).parse(self.xs)
 
+Fail = Parser.container(lambda stream: [], "Fail")
+Epsilon = Parser.container(lambda stream: Succeed(None, stream).parse(stream), "Epsilon")
 
-Epsilon = Parser.container(lambda stream: Succeed(None, stream).parse(stream))
-
-Fail = []
-
-
-class Composition(Parser):
-
-    """def __parse__(self, stream):
-        def seq_comp(result, p):
-            res = []
-            for v1, xs1 in result:
-                pres = p.parse(xs1)
-                for v2, xs2 in pres:
-                    if v1 is None:
-                        res.append((v2, xs2))
-                    else:
-                        res.append(((v1, v2), xs2))            
-            return res
-
-        res = seq_comp(Epsilon.parse(stream), self.parsers[0])
-        for p in self.parsers[1:]:
-            res = seq_comp(res, p)
-
-        return res"""
-
-    def __parse__(self, stream):        
-        res = []
-        for v1, xs1 in self.parsers[0].parse(stream):
-            p2res = self.parsers[1].parse(xs1)
-            for v2, xs2 in p2res:
-                if v1 is None:
-                    res.append((v2, xs2))
-                else:
-                    res.append(((v1, v2), xs2))            
-        return res
-
-class Name(Parser):
-
-    def __init__(self, parser, name):
-        super(Name, self).__init__(parser)
-        self.name = name
-
-    def __parse__(self, stream):
-        return self.parser.parse(stream)
-
-    def __repr__(self):
-        return repr(self.parser).replace(self.parser.__class__.__name__, self.name)
-
-#CompositionIgnoreFirst = lambda *parsers : Composition(*parsers) <= (lambda xs: xs[1:])
-
-class CompositionIgnoreFirst(Parser):
+Item = Parser.container(lambda stream: [(stream[0], stream[1:])] if len(stream) > 0 else Parser.zero().parse(stream), "Item")
     
-    def __parse__(self, stream):
-        return (Composition(*self.parsers) <= (lambda xs: xs[1])).parse(stream)
+Satisfy = lambda p: Item >> (lambda x: Parser.result(x) if p(x) else Parser.zero())
+    
+Composition = lambda p, q: p >> (
+                 lambda x: q >= (
+                 lambda y: (x, y)))
 
-CompositionIgnoreLast = lambda *parsers : Composition(*parsers) <= (lambda xs: xs[0])
+CompositionIgnoreLeft = lambda p, q: p >> (lambda _: q >= id_)
+CompositionIgnoreRight = lambda p, q: p >> (lambda x: q >= const(x))
 
-
-class Sequence(Parser):
-
-    def __parse__(self, stream):
-        if len(self.parsers) == 0:
-            return Epsilon
-        else:
-            res = self.parsers[0].parse(stream)
-            for p in self.parsers[1:]:
-                res = Cons(res, p)
-            return res
-
-
-class Choice(Parser):
-
-    def __parse__(self, stream):        
-        results = []
-        for p in self.parsers:
-            results.extend(p.parse(stream))
-        return results
-
-
-class Apply(Parser):
-
-    def __init__(self, parser, f):
-        super(Apply, self).__init__(parser)        
-        self.f = f
-
-    def __parse__(self, stream):
-        return [ (self.f(v), xs) for v, xs in self.parser.parse(stream)]
-
-
-
-class Just(Parser):
-
-    def __parse__(self, stream):
-        return list(filter(lambda t: t[1] == "", self.parser.parse(stream)))
-
-
-Digit = (Satisfy(lambda x: x in '0123456789') <= (lambda x: int(x)))
-Pack = lambda open_, parser, close: open_ > (parser < close)
+Pack = lambda open_, parser, close: open_ >> (lambda _: parser >> (lambda x: close >= const(x)))
 Parenthesized = lambda parser: Pack(Symbol('('), parser, Symbol(')'))
 Bracketed = lambda parser: Pack(Symbol('['), parser, Symbol(']'))
-cons_ = lambda pair: [pair[0]] + pair[1]
-list_ = lambda x: [x]
-nil_ = lambda x: []
 
-Cons = lambda p, q: p * q <= cons_
+Option = lambda parser: Name(parser | Epsilon, "Option")
+Cons = lambda p, q: p >> (lambda x: q >= (lambda xs: [x] + xs))
 
-"""
-class Many(Parser):
-
-    def __parse__(self, stream):
-        return (Cons(self.parser, self) | (Epsilon <= nil_)).parse(stream)"""
 
 def Many(p):    
-    return (p >> (lambda x: Many(p) >> (lambda xs: Parser.result([x] + xs)))) + Epsilon# [[]]
+    return Name((p >> (lambda x: Many(p) >= (lambda xs: [x] + xs))) | Parser.zero(), "Many", repr(p))
 
-Option = lambda parser: (parser <= list_) | (Epsilon <= nil_)
+Many1 = lambda parser: Name(Cons(parser, Many(parser)), "Many1", repr(parser))
 
+ListOf = lambda parser, separator: Name(Cons(parser, Many(separator > parser)) | Parser.zero(), "ListOf", repr(parser))
+CommaList = lambda parser: ListOf(parser, Symbol(','))
+SemiColonList = lambda parser: ListOf(parser, Symbol(';'))
+
+Apply = lambda p, f: p >= (lambda x: f(x))
 
 class OptionDef(Parser):
 
@@ -313,46 +275,6 @@ class OptionDef(Parser):
         return (Option(self.parser) <= f).parse(stream)
 
 
-Many1 = lambda parser: Cons(parser, Many(parser))
-Natural = Many1(Digit) <= foldl(lambda a, b: a*10 + b, 0)
-Integer = (OptionDef(Symbol('+') | Symbol('-'), 1, lambda x: {'-':-1, '+':1}[x]) * Natural) <= (lambda num: num[0] * num[1])
-ListOf = lambda parser, separator: Cons(parser, Many(separator > parser)) | Epsilon
-CommaList = lambda parser: ListOf(parser, Symbol(','))
-SemiColonList = lambda parser: ListOf(parser, Symbol(';'))
-
-
-class Some(Parser):
-
-    def __parse__(self, stream):
-        return Just(self.parser).parse(stream)[0][0]
-
-
-class First(Parser):
-
-    def __parse__(self, stream):
-        res = self.parser.parse(stream)
-        if len(res) == 0:
-            return []
-        else:
-            return [res[0]]
-
-
-Greedy = lambda parser: First(Many(parser))
-Greedy1 = lambda parser: First(Many1(parser))
-
-Compulsion = lambda parser: First(Option(parser))
-
-
-class Forward(Parser):
-
-    def set(self, parser):
-        super(Forward, self).__init__(parser)
-
-    def __parse__(self, stream):
-        if self.parser is None:
-            raise ParserException("Forward parser has not been initialized yet.")
-        else:
-            return self.parser.__parse__(stream)
 
 class RegExp(Parser):
 
@@ -360,16 +282,36 @@ class RegExp(Parser):
         super(RegExp, self).__init__()
         self.rexp = re.compile(rexp)    
 
-    def __parse__(self, stream):
+    def digest(self, stream):
         match = self.rexp.match(stream)        
-        if not match:
-            return Fail
-        matched_str = match.group() 
-        return [(matched_str, stream[len(matched_str):])]
+        if match:
+            matched_str = match.group()
+            return (matched_str, stream[len(matched_str):])
+        else:
+            return None
+
+    def __parse__(self, stream):
+        res = self.digest(stream)        
+        if res is None:
+            return Fail.parse(stream)
+        return self.result(res[0]).parse(res[1])
+    
+    def consume(self, stream):
+        res = self.digest(stream)
+        if res is None:
+            return stream
+        else:
+            return res[1]
 
 
-WhiteSpace = RegExp("[\s]*")
-UpperId = RegExp("[A-Z][\w]*")
-LowerId = RegExp("[a-z][\w]*")
+WhiteSpace = RegExp("[\s]+")
+UpperId = Name(RegExp("[A-Z][\w]*"), "UpperId")
+LowerId = Name(RegExp("[a-z][\w]*"), "LowerId")
+Word = Name(RegExp("[\w]+"), "Word")
+
+Digit = Name(RegExp("[0-9]"), "Digit")
+Natural = Name(RegExp("[0-9]+"), "Natural")
+Integer = Name(RegExp("-?[0-9]+"), "Integer")
+ 
 
 det_parse = lambda parser, stream: parser.parse(stream)[0][0]

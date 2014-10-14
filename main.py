@@ -1,1 +1,1 @@
-import example.gbs_parser
+import example.lambda_parser
