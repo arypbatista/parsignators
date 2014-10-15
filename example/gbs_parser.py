@@ -2,9 +2,6 @@ from monadic_parsignators import *
 import operator as op
 from ast import *
     
-#Result.__parse__ = lambda self, stream: [(ASTNode(self.value), stream)] 
-
-
 
 
 gbs_prog = """
@@ -39,6 +36,10 @@ simplecmd = Forward()
 compcmd = Forward()
 cmd = Forward()
 
+Literal = (Integer | UpperId) >= (lambda lit:
+           ASTNode(["literal", lit])
+           )
+
 procedureName = UpperId
 functionName = LowerId
 varName = LowerId
@@ -47,17 +48,36 @@ Block = lambda parser: Pack(Symbol("{"), parser, Symbol("}"))
 
 varTuple = Parenthesized(Option(CommaList(varName)))
 parameters = varTuple
-gexpr = varName | funcCall | Integer 
+gexpr = varName | funcCall | Literal 
 gexpTuple = Parenthesized(Option(CommaList(gexpr)))
-funcCall.set(Sequence(functionName, gexpTuple))
-procCall = Sequence(procedureName, gexpTuple)
 
-blockcmd = Block(Many(cmd))
-repeat = Sequence(Token("repeat"), Parenthesized(gexpr), blockcmd)
+funcCall.set(
+           functionName      >> (lambda name:
+           gexpTuple         >= (lambda args:
+           ASTNode(["funcCall", name, args])))
+)
+
+procCall = procedureName     >> (lambda name:
+           gexpTuple         >= (lambda args:
+           ASTNode(["procCall", name, args])))
+
+blockcmd = Symbol("{") >> (lambda _:
+           Many(cmd)   >> (lambda cmds:
+           Symbol("}") >= (lambda _:
+           ASTNode(["Block", ASTNode(cmds)]))))
+
+repeat = Token("repeat")      >> (lambda tok_:
+         Parenthesized(gexpr) >> (lambda expr:
+         blockcmd             >= (lambda block:
+         ASTNode([tok_, expr, block]))))
 
 branch = Sequence(gexpr, Token("->"), blockcmd)
 branches = Many(branch)
-default_branch = Sequence(Token("_"), Token("->"), blockcmd)
+
+default_branch = Token("_")        >> (lambda _:
+                 Token("->")       >> (lambda _:
+                 blockcmd          >= (lambda block: 
+                 ASTNode(["defaultBranch", block] ))))
 
 cmd.set(simplecmd | compcmd)
 simplecmd.set(procCall)
@@ -75,7 +95,13 @@ _range = Sequence(gexpr, Token(".."), gexpr) | Sequence(gexpr,  Token(","), gexp
 seqdef = _range | enum
 valSequence = Bracketed(seqdef)
 
-foreach = Sequence(Token("foreach"), varName, Token("in"), valSequence, blockcmd)
+foreach = Token("foreach")   >> (lambda _:
+          varName            >> (lambda index:
+          Token("in")        >> (lambda _:
+          valSequence        >> (lambda seq:
+          blockcmd           >= (lambda block:
+          ASTNode(["foreach", index, seq, block])
+          )))))
 
 compcmd.set(    
     ifthenelse |
@@ -92,19 +118,41 @@ compcmd.set(
 
 _return = Sequence(Token("return"), gexpTuple)
 
-program_body = Block(Many(cmd) >> (lambda cmds: Option(_return) >= (lambda rtn: cmds if rtn is None else cmds + [rtn])))
-program_def = Sequence(Token("program"), program_body)
+program_body = Block(Many(cmd)      >> (lambda cmds: Option(_return) 
+                                    >= (lambda rtn: 
+               ASTNode(cmds if rtn is None else cmds + [rtn])
+               )))
+
+program_def = Token("program")      >> (lambda _:
+              program_body          >= (lambda block:
+              ASTNode(["entrypoint", "program", block])
+              ))
 
 iprog_body = Block(branches >> (lambda bs : default_branch >= (lambda dfb: bs + [dfb])))
 iprog_def = Sequence(Token("interactive"), Token("program"), iprog_body) 
 
-function_body = Block(Many(cmd) >> (lambda cmds: _return >= (lambda rtn: cmds + [rtn])))
-function_def = Sequence(Token("function"), functionName, parameters, function_body)
+function_body = Block(Many(cmd))    >> (lambda cmds: 
+                _return             >= (lambda rtn: 
+                ASTNode(["block"] + cmds + [rtn])
+                ))
+
+function_def = Token("function")    >> (lambda _:
+               functionName         >> (lambda name:
+               parameters           >> (lambda params:
+               function_body        >= (lambda body:
+               ASTNode(["function", name, params, body])
+               ))))
+
 
 procedure_body = blockcmd
-procedure_def = Sequence(Token("procedure"), procedureName, parameters, procedure_body)
+procedure_def = Token("procedure") >> (lambda _:
+                procedureName      >> (lambda name:
+                parameters         >> (lambda params:
+                procedure_body     >= (lambda body:
+                ASTNode(["procedure", name, params, body])
+                ))))
 
-defs = Many1(program_def | iprog_def | function_def | procedure_def)
+defs = Many1(program_def | function_def | procedure_def ) #| iprog_def)
 
 gobstones = defs
 
