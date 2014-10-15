@@ -1,16 +1,30 @@
 from monadic_parsignators import *
 from ast import *
 
-functionName = Word
+def lazy_choice(self, stream):
+    parsing_results = self.parsers[0].parse(stream)
+    success_results = list(filter(lambda t: t[1] == '', parsing_results))
+    if len(success_results) > 0:
+        return [success_results[0]]
+    else:
+        return self.parsers[1].parse(stream)
+
+#Plus.__parse__ = lazy_choice
+
+functionName = LowerId | UpperId
 
 expression = Forward()
 
-arguments = Parenthesized(Many(expression)) >= (lambda args: ASTNode(["arguments"] + args) if len(args) > 0 else None)
+arguments = Many(expression)   >= (lambda args: 
+            ASTNode(["arguments"] + args)
+            )
 
-application = functionName                    >> (lambda fname: 
-              arguments                       >= (lambda args:
-              ASTNode(["funcCall", fname, args])
-              ))
+application = Symbol("(")           >> (lambda _:
+              expression            >> (lambda e1: 
+              expression            >> (lambda e2:
+              Symbol(")")           >= (lambda _:
+              ASTNode(["application", e1, e2])
+              ))))
 
 variable = (LowerId | UpperId) >= (lambda var: ASTNode(["variable", var]))
 parameter = variable
@@ -28,8 +42,9 @@ lambda_f = Token("\\")      >> (lambda _:
 expression.set(
     literal 
   | variable
-  | application
   | lambda_f
+  | application
+  | Parenthesized(expression)
 ) 
 
 
@@ -44,17 +59,25 @@ definitions = Many(definition) >= (lambda defs: ASTNode(["program"] + defs))
 
 
 
-def funcToPython(tree):
+def funcToPython(tree, constant_functions=[]):
     if tree[0] == 'program':
-        return "from pymonad.Reader import curry\n\n" + "\n\n".join(map(funcToPython, tree[1:])) + "\n\nmain()"
+        for def_ in tree[1:]:
+            if len(def_[2].children[1:]) == 0:
+                constant_functions.append(def_[1])
+        return "from pymonad.Reader import curry\n\n" + "\n\n".join(map(lambda x: funcToPython(x, constant_functions), tree[1:])) + "\n\nmain()"
     elif tree[0] == 'definition':
         return ("@curry\ndef %s(%s):\n" + " " * 4 + "return %s") % (tree[1], funcToPython(tree[2]), funcToPython(tree[3]))
-    elif tree[0] in ['literal', 'variable']:
+    elif tree[0] in ['literal']:
         return tree[1]
+    elif tree[0] in ['variable']:
+        if tree[1] in constant_functions:
+            return tree[1] + "()"
+        else:
+            return tree[1]
     elif tree[0] in ['arguments', 'parameters']:
         return ", ".join(map(funcToPython, tree[1:]))
-    elif tree[0] == 'funcCall':
-        return "%s(%s)" % (tree[1], funcToPython(tree[2]))
+    elif tree[0] == 'application':
+        return "%s(%s)" % (funcToPython(tree[1]), funcToPython(tree[2]))
     elif tree[0] == 'lambda':
         return "(lambda %s: %s)" % (funcToPython(tree[1]), funcToPython(tree[2]))
     else:
@@ -62,17 +85,31 @@ def funcToPython(tree):
 
 
 prog = """
-const x = x
+error x = (exit x)
 
-main = print(const(2))
+pair x y f = ((f x) y) 
+first x y = x
+second x y = y
+
+cons x xs = ((pair x) xs)
+head xs = (xs first)
+tail xs = (xs second)
+
+nil = ((pair error) error)
+
+aList = ((cons 10)((cons 30)((cons 40) nil)))
+
+main = (print (head (tail (tail aList))))
 """  
 print("######################" )
 print(" Functional python" )
 print("######################")
 print(prog)
 
-
-#print("\n".join([ repr(x) for x in definitions.parse(prog)]))
+print("######################" )
+print(" Non-deterministic parsing" )
+print("######################")
+print("\n".join([ repr(x) for x in definitions.parse(prog)]))
 
 print("######################" )
 print(" AST Tree" )
