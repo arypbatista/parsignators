@@ -314,4 +314,4 @@ Natural = Name(RegExp("[0-9]+"), "Natural")
 Integer = Name(RegExp("-?[0-9]+"), "Integer")
  
 
-det_parse = lambda parser, stream: parser.parse(stream)[0][0]
+det_parse = lambda parser, stream: list(filter(lambda t: t[1] == '', parser.parse(stream)))[0][0]

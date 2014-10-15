@@ -6,6 +6,9 @@ class ASTNode(object):
     def __repr__(self):
         return 'AST(' + repr(self.children) + ')'
     
+    def __getitem__(self, index):
+        return self.children[index]
+    
     def show_ast(self, indent=0):
         """Return a string, result of pretty printing the full
 AST starting at this node, with the given indentation.
