@@ -1,6 +1,10 @@
 from monadic_parsignators import *
 from ast import *
 
+WhiteSpaceAndLineComment = RegExp("([\s]*[#][^\n]*|[\s]+)")
+
+Parser.junk = lambda self: WhiteSpaceAndLineComment
+
 def lazy_choice(self, stream):
     parsing_results = self.parsers[0].parse(stream)
     success_results = list(filter(lambda t: t[1] == '', parsing_results))
@@ -30,7 +34,7 @@ variable = (LowerId | UpperId) >= (lambda var: ASTNode(["variable", var]))
 parameter = variable
 parameters = Many(parameter) >= (lambda params: ASTNode(["parameters"] + params))
 
-literal = Integer >= (lambda num: ASTNode(["literal", num]))
+literal = (Integer | String) >= (lambda num: ASTNode(["literal", num]))
 
 lambda_f = Token("\\")      >> (lambda _:
            parameters       >> (lambda params:
@@ -91,7 +95,7 @@ pair x y f = ((f x) y)
 first x y = x
 second x y = y
 
-cons x xs = ((pair x) xs)
+cons x xs = ((pair x) xs) #dadada
 head xs = (xs first)
 tail xs = (xs second)
 
@@ -99,7 +103,8 @@ nil = ((pair error) error)
 
 aList = ((cons 10)((cons 30)((cons 40) nil)))
 
-main = (print (head (tail (tail aList))))
+#main = (print (head (tail (tail aList))))
+main = (print "dadada")
 """  
 print("######################" )
 print(" Functional python" )

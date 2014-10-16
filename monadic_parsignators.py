@@ -84,7 +84,7 @@ class Parser(object):
         raise ParserException("Parsing not implemented.")
 
     def parse(self, stream):               
-        return self.__parse__(self.whitespace().consume(stream))
+        return self.__parse__(self.junk().consume(stream))
 
     def consume(self, stream):
         res = self.__parse__(stream)
@@ -93,7 +93,7 @@ class Parser(object):
         else:
             return res[0][1]
 
-    def whitespace(self):
+    def junk(self):
         return WhiteSpace
 
     def __repr__(self):
@@ -312,6 +312,6 @@ Word = Name(RegExp("[\w]+"), "Word")
 Digit = Name(RegExp("[0-9]"), "Digit")
 Natural = Name(RegExp("[0-9]+"), "Natural")
 Integer = Name(RegExp("-?[0-9]+"), "Integer")
- 
+String = Name(RegExp("[\"][\w]*[\"]"), "String")
 
 det_parse = lambda parser, stream: list(filter(lambda t: t[1] == '', parser.parse(stream)))[0][0]
